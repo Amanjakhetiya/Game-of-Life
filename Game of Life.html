@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en" >
+
+<head>
+
+<meta charset="utf-8" />
+
+<title>Game of Life</title>
+
+<style>
+  body                          {}
+  .container                    {background-color:#D3D3D3;width:1024px;margin:5px auto;text-align:center;padding: 20px;}
+  #board                        {width:100%;margin:5px auto;text-align:center;}
+  .row                          {display:block;width:100%;height: 22px;padding:0px;margin:0px;}
+  .cell                         {display:inline-block;width:10px;height:10px;margin:2px;padding:4px;cursor:pointer;}
+  .alive                        {background:#000000;}
+  .dead                         {background:#FFFFFF;}
+  #steps_remaining              {display:inline-block;float:right; padding: 0px;}
+  .container a, .container span {color: #0000FF;line-height:normal;text-decoration: none;margin:4px;}
+  .container a:hover {color: #4444DD;}
+</style>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+
+<script type="text/javascript">
+//Globals
+var PAUSED = true;
+var STATE_ALIVE = 1;
+var STATE_DEAD = 0;
+
+//Config
+var width = 30;
+var height = 30;
+var update_delay = 50; //Screen refresh delay in ms
+
+//Declare modules/functions up front
+var State;
+var Board;
+var start;
+var stop;
+var run;
+var apply_click_handers;
+
+$(document).ready(function() {
+    //console.log("Starting...");
+
+    //Init
+    State.init(height, width);
+    State.randomise();
+    var current_state = State.get();
+    Board.init(height, width, current_state);
+    Board.draw();
+
+    apply_click_handers();
+});
+
+apply_click_handers = function() {
+
+    //Start/Stop
+    $("#start").click(function(e) {
+        if(PAUSED) {
+            var time_steps = $("#steps").val();
+            start(time_steps, update_delay);
+        }
+        else {
+            stop();
+        }
+        e.preventDefault();
+    });
+
+    //Step
+    $("#step").click(function(e) {
+        Board.update_and_draw(State.update());
+        e.preventDefault();
+    });
+    
+    //Randomise State
+    $("#random").click(function(e) {
+        Board.update_and_draw(State.randomise());
+        e.preventDefault();
+    });
+
+    //Invert State
+    $("#invert").click(function(e) {
+        Board.update_and_draw(State.invert());
+        e.preventDefault();
+    });
+
+    //Clear Board
+    $("#reset").click(function(e) {
+        Board.reset();
+        e.preventDefault();
+    });
+    
+    //Toggle cell state
+    $("body").on("click", ".cell", function() {
+        var me = $(this);
+        var i = me.data("i");
+        var j = me.data("j");
+        Board.update_and_draw(State.toggle(i, j));
+
+        //Debug
+        var alive = State.get_state(i, j) === STATE_ALIVE;
+        console.log("i, j, Now Alive: ", i, j, alive);
+        console.log("Number of neighbours: ", State.neighbours(i, j));
+    });
+};
+
+//Run the program
+run = function(steps, delay) {
+    if(steps >= 0 && !PAUSED) {
+        //console.log("Step Number: ", steps);
+        $("#steps_remaining").html(steps);
+        State.update();
+        var current_state = State.get();
+        Board.update_and_draw(current_state);
+        setTimeout(function() {
+            run(steps-1, delay);
+        }, delay);
+    }
+    else {
+        stop();
+    }
+}
+
+//Start the game
+start = function(time_steps, update_delay) {
+    PAUSED = false;
+    run(time_steps, update_delay);
+    $("#start").html("Stop");
+};
+
+//Stop the game
+stop = function() {
+    $("#start").html("Start");
+    $("#steps_remaining").html("0");
+    PAUSED = true;
+}
+
+//Module to represent and render the board
+Board = (function() {
+    var _width;
+    var _height;
+    
+    var _board_container;
+    var _board_state;
+    
+    var _row = function() {
+        return $("<div>").addClass("row");
+    }; 
+    var _cell = function() {
+        return $("<div>").addClass("cell");
+    };
+    
+    return {
+        init:function(height, width, board_state) {
+            //console.log("Init board...");
+            _height = height;
+            _width = width;
+            _board_state = board_state;
+            _board_container = $("#board");
+        },
+        update:function(board_state) {
+            _board_state = board_state;
+        },
+        //Draw/redraw the board
+        draw:function() {
+            //console.log("Drawing board...");
+            var i, j, row, cell;
+            
+            _board_container.empty();
+
+            for(i = 0; i < _height; i++) {
+                row = _row();
+                for(j = 0; j < _width; j++) {
+                    cell = _cell();
+                    //cell.html(_board_state[i][j]);
+                    cell.attr("data-i", i);
+                    cell.attr("data-j", j);
+                    if(_board_state[i][j] === STATE_ALIVE) {
+                        cell.addClass("alive");
+                    }
+                    else {
+                        cell.addClass("dead");
+                    }
+                    row.append(cell);
+                }
+                _board_container.append(row);
+            }
+        },
+        update_and_draw:function(board_state) {
+            Board.update(board_state);
+            Board.draw();
+        },
+        reset:function() {
+            Board.update_and_draw(State.reset());
+        },
+    };
+}());
+
+//Module to modify the state of the game
+State = (function() {
+    var _current_state;
+    var _new_state;
+    var _height;
+    var _width;
+    
+    var _init_state = function() {
+        var i;
+        //Zero a 2D Array
+        var state = new Array(_height);
+        for(i = 0; i < _height; i++) {
+            state[i] = new Array(_width);
+        }
+        //Clone the array for later
+        _new_state = jQuery.extend(true, {}, state);
+        return state;
+    };
+    
+    var _fill_random = function() {
+        var i, j;
+        for(i = 0; i < _height; i++) {
+            for(j = 0; j < _width; j++) {
+                _current_state[i][j] = Math.round(Math.random());
+            }
+        }
+    };
+
+    var _invert = function() {
+        var i, j;
+        for(i = 0; i < _height; i++) {
+            for(j = 0; j < _width; j++) {
+                if(_current_state[i][j] === STATE_ALIVE) {
+                    _current_state[i][j] = STATE_DEAD;
+                }
+                else {
+                    _current_state[i][j] = STATE_ALIVE;
+                }
+            }
+        }
+    };
+    
+    //Returns number of alive neighbouring cells using the Moore neighbourhood algorithm
+    var _count_neighbours = function(i, j) {
+        var count = 0;
+        
+         //check left
+        if (i - 1 >= 0 && _current_state[i-1][j] === STATE_ALIVE) {
+            count++;
+        }
+        //check right
+        if (i + 1 < _height && _current_state[i+1][j] === STATE_ALIVE) {
+            count++;
+        }
+        //check bottom
+        if (j + 1 < _width && _current_state[i][j+1] === STATE_ALIVE) {
+            count++;
+        }
+        //check top
+        if (j - 1 >= 0 && _current_state[i][j-1]) {
+            count++;
+        }
+        //now get all of the diagonal cells
+        //get top left
+        if( i - 1 >= 0 && j - 1 >= 0 && _current_state[i-1][j-1]  === STATE_ALIVE) {
+            count++;
+        }
+        //get top right
+        if( i + 1 < _height && j - 1 >= 0 && _current_state[i+1][j-1]  === STATE_ALIVE) {
+            count++;
+        }
+        //get bottom right
+        if( i + 1 < _height && j + 1 < _width && _current_state[i+1][j+1]  === STATE_ALIVE) {
+            count++;
+        }
+        //get bottom left
+        if(i - 1 >= 0 && j + 1 < _width && _current_state[i-1][j+1] === STATE_ALIVE) {
+            count++;
+        }
+        
+        return count;
+    };
+    
+    var _update = function() {
+        var i, j;
+
+        for(i = 0; i < _height; i++) {
+            for(j = 0; j < _width; j++) {
+                var neighbours = _count_neighbours(i, j);
+                var alive = _current_state[i][j] === STATE_ALIVE;
+                //Rules for state transitions
+                if(alive) {
+                    if(neighbours < 2) {
+                        _new_state[i][j] = STATE_DEAD;
+                    }
+                    else if(neighbours < 4) {
+                        _new_state[i][j] = STATE_ALIVE;
+                    }
+                    else {
+                        _new_state[i][j] = STATE_DEAD;
+                    }
+                }
+                else {
+                    if(neighbours === 3) {
+                        _new_state[i][j] = STATE_ALIVE;
+                    }
+                    else {
+                        _new_state[i][j] = STATE_DEAD;
+                    }
+                }
+            }
+        }
+        //Deep copy the new state to the current state
+        _current_state = jQuery.extend(true, {}, _new_state);
+    };
+
+    return {
+        init:function(height, width) {
+            _height = height;
+            _width = width;
+            _current_state = _init_state();
+            //console.log(_current_state);
+        },
+        randomise:function() {
+            _fill_random();
+            return _current_state;
+        },
+        get:function() {
+            return _current_state;
+        },
+        get_state:function(i, j) {
+            return _current_state[i][j];
+        },
+        update:function() {
+            //console.log("Updating current state...");
+            _update();
+            return _current_state;
+        },
+        neighbours:function(i, j) {
+            return _count_neighbours(i, j);
+        },
+        toggle:function(i, j) {
+            if(_current_state[i][j] === STATE_ALIVE) {
+                _current_state[i][j] = STATE_DEAD;
+            }
+            else {
+                _current_state[i][j] = STATE_ALIVE;
+            }
+            return _current_state;
+        },
+        invert:function() {
+            _invert();
+            return _current_state;
+        },
+        reset:function() {
+            _current_state = _init_state();
+            return _current_state;
+        },
+    };   
+}());
+
+</script>
+
+</head>
+
+<body>
+    <div class="container">
+        <h1>Game of Life</h1>
+        <div id="board"></div>
+        <a href="#" id="start">Start</a>
+        <a href="#" id="step">Step</a>
+        <a href="#" id="random">Randomise</a>
+        <a href="#" id="invert">Invert</a>
+        <a href="#" id="reset">Clear</a>
+        <span>Ticks: <input id="steps" type="text" value="1000" size="4" /></span>
+        <span id="steps_remaining">0</span>
+    </div>
+</body>
+
+</html>
